@@ -27,8 +27,7 @@ import {
 import {startScan} from './ble-service';
 
 const App: () => React$Node = () => {
-
-  // const bleManager = new BleManager();
+  const bleManager = new BleManager();
 
   const zlib = require('react-zlib-js');
 
@@ -36,7 +35,7 @@ const App: () => React$Node = () => {
 
   // console.log(bleManager);
 
-  const startScan = async bleManager => {
+  const startScan = async () => {
     try {
       return await bleManager.startDeviceScan(null, null, (error, device) => {
         if (error) {
@@ -48,11 +47,12 @@ const App: () => React$Node = () => {
           return;
         }
 
-        if (device.localName.includes(0, 'TGP_PYTURISMO')) {
+        if (device === null && device.localName.includes(0, 'TGP_PYTURISMO')) {
           return;
         }
 
         bleManager.stopDeviceScan();
+        connectToDevice(device);
       });
     } catch (error) {
       throw new Error(error.message);
@@ -73,9 +73,9 @@ const App: () => React$Node = () => {
     let responsesReceived = 0;
     let responseTotal = '';
 
-    let notificationValue = 'Tengo miedo';
+    let notificationValue = '';
 
-    const subscription = notifiableCh.monitor(async (error, characteristic) => {
+    notifiableCh.monitor(async (error, characteristic) => {
       console.log('Monitor');
 
       if (error) {
@@ -86,6 +86,8 @@ const App: () => React$Node = () => {
       if (characteristic === undefined || characteristic === null) {
         return;
       }
+
+      console.log(atob(characteristic.value));
 
       if (responsePartsCount === 0) {
         notificationValue = atob(characteristic.value);
@@ -98,26 +100,21 @@ const App: () => React$Node = () => {
         responsesReceived++;
       }
       if (responsesReceived === responsePartsCount) {
-        console.log(
-          decompressData(btoa(responseTotal)).replace(/(\r\n|\n|\r)/gm, ''),
-        );
+        decompressData(btoa(responseTotal));
       }
     });
-    console.log('Subscription', subscription);
   };
 
-  const getWriteCharacteristic = async writableCh => {
-    await writableCh.writeWithoutResponse(btoa('Pass=pYtuR1sM0!!2o2I'));
-    await writableCh.writeWithoutResponse(btoa('np=1'));
-    console.log('Done');
+  // const getWriteCharacteristic = async writableCh => {
+  //   //await writableCh.writeWithoutResponse(btoa('Pass=pYtuR1sM0!!2o2I'));
+  //   await writableCh.writeWithoutResponse(btoa('np=1'));
+  //   console.log('Done');
 
-    await writableCh.writeWithResponse(
-      btoa(
-        '1{"http":{"MET":"LOCAL","URL":"OfyEv"},"Body": { "ofertas": "205", "eventos": ""}}\n',
-      ),
-    );
-    console.log('Done');
-  };
+  //   await writableCh.writeWithResponse(
+  //     btoa('1{"http":{"MET":"LOCAL","URL":"index"},"Body":{}}\n'),
+  //   );
+  //   console.log('Done');
+  // };
 
   const getIdTGP = async readableCh => {
     try {
@@ -135,7 +132,7 @@ const App: () => React$Node = () => {
     let notifiableCh = null;
     let writableCh = null;
     let readableCh = null;
-    let IdTGP = '';
+    let idTGP = '';
 
     characteristics.forEach(characteristic => {
       if (characteristic.isNotifiable) {
@@ -153,13 +150,15 @@ const App: () => React$Node = () => {
         console.log('conectado al readable');
       }
     });
-    IdTGP = await getIdTGP(readableCh).then(response => {
-      return response.value;
-    });
-    console.log(atob(IdTGP));
-    getWriteCharacteristic(writableCh);
-    const result = await getNotifyCharacteristic(notifiableCh);
-    console.log('getNotifyCharacteristic', result);
+    // idTGP = await getIdTGP(readableCh).then(response => {
+    //   return response.value;
+    // });
+    // console.log(atob(idTGP));
+    sendPass(characteristics);
+    await sendInfo(characteristics);
+    sendIndex(characteristics);
+    // getWriteCharacteristic(writableCh);
+    getNotifyCharacteristic(notifiableCh);
   };
 
   const decompressData = data => {
@@ -185,10 +184,77 @@ const App: () => React$Node = () => {
     console.log(startScan(bleManager));
   };
 
+  const sendPass = async characteristic => {
+    try {
+      const pass = 'Pass=pYtuR1sM0!!2o2I';
+      let writebleCh = null;
+      writebleCh = characteristic.find(
+        item => item.isWritableWithoutResponse === true,
+      );
+      await writebleCh.writeWithoutResponse(btoa(pass) + '\n');
+    } catch (error) {
+      throw new Error(error.message);
+    }
+  };
+
+  const sendInfo = async characteristic => {
+    try {
+      let writebleCh = null;
+      let readableCh = null;
+      let idTGP = null;
+      let mess = '';
+
+      readableCh = characteristic.find(item => item.isReadable === true);
+
+      idTGP = await getIdTGP(readableCh).then(response => {
+        return response.value;
+      });
+      writebleCh = characteristic.find(
+        item => item.isWritableWithoutResponse === true,
+      );
+      // console.log(readableCh);
+      mess =
+        '1{"http":{"MET": "POST","URL":"http://35.229.26.208:8871/tepinteractions"},"Body":{"id_tgp":"' +
+        atob(idTGP) +
+        '", "id_tur": 1, "coor":"3.408975, -76.547253","fecha_con":"2021-01-20T14:00"}}\n';
+      // console.log(mess);
+      await writebleCh.writeWithoutResponse(btoa('np=1'));
+      await writebleCh.writeWithoutResponse(btoa(mess));
+    } catch (error) {}
+  };
+
+  const sendIndex = async characteristic => {
+    try {
+      let writebleCh = null;
+      let readableCh = null;
+      let mess = null;
+      writebleCh = characteristic.find(
+        item => item.isWritableWithoutResponse === true,
+      );
+      // console.log(readableCh);
+      mess =
+        '1{"http":{"MET":"LOCAL","URL":"OfyEv"},"Body": { "ofertas": "26", "eventos": "12"}}\n';
+      // console.log(mess);
+      await writebleCh.writeWithoutResponse(btoa('np=1'));
+      await writebleCh.writeWithoutResponse(btoa(mess));
+    } catch (error) {}
+  };
+  const getWriteCharacteristic = async characteristic => {
+    try {
+      return await characteristic.find(
+        item => item.isWritableWithoutResponse === true,
+      );
+    } catch (error) {
+      throw new Error(error.message);
+    }
+  };
+
+  startScan();
+
   // const device = null;
   //   const nameTGP = 'TGP_PYTURISMO';
   //   device = await bleManager.startDeviceScan(null, null, (error, device) => {
-  //     if (error) {
+  //     if (error) {ñ
   //       console.log(JSON.stringify(error));
   //       return;
   //     }
@@ -205,7 +271,7 @@ const App: () => React$Node = () => {
   //   });
   //   return device;
 
-  getDataOffers();
+  // getDataOffers();
 
   // zlib.unzip(buffer, (err, buffer) => {
   //   console.log('tercero se ejecuta');
